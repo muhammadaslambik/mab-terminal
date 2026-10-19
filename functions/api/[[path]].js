@@ -4,6 +4,8 @@ const BACKEND = "https://api.mab-terminal.workers.dev";
 const ROUTES = {
   "/api/health": [],
   "/api/idx/cacing": [],
+  "/api/market/overview": [],
+  "/api/market/news": [],
   "/api/idx/rumor": ["matched"],
   "/api/signals": ["market", "symbols"],
 };

@@ -36,6 +36,189 @@ svg{width:100%;height:auto;max-width:100%}
 <div class="scr" id="scr" onclick="side=false;draw()"></div>
 <div id="app"><nav id="nav"></nav><main id="main"></main></div>
 <script>
+(function(){
+const ESC=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const CAC=window.CAC={st:'idle',data:null,at:0,err:null,flt:'inti',open:null};
+const HL={st:'idle',data:null,err:null,at:0};
+async function api(path){
+  const r=await fetch(path,{cache:'no-store'});
+  if(!r.ok){let m='';try{m=(await r.json()).error||''}catch(_e){}throw new Error('HTTP '+r.status+(m?': '+m:''))}
+  return r.json();
+}
+const isN=v=>typeof v==='number'&&isFinite(v);
+const wib=iso=>{if(!iso)return '—';const d=new Date(iso);if(isNaN(d))return '—';return d.toLocaleString('id-ID',{timeZone:'Asia/Jakarta',hour12:false,day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+' WIB'};
+const ageH=iso=>{const t=Date.parse(iso);return isFinite(t)?(Date.now()-t)/3600000:Infinity};
+const ago=iso=>{const h=ageH(iso);if(!isFinite(h))return '';return h<1?Math.round(h*60)+' mnt lalu':h<48?Math.round(h)+' jam lalu':Math.round(h/24)+' hari lalu'};
+const pct=(v,d=1)=>isN(v)?v.toFixed(d)+'%':'—';
+const idr=v=>!isN(v)?'—':v>=1e9?'Rp'+(v/1e9).toFixed(1)+' M':'Rp'+Math.round(v/1e6)+' jt';
+const TIERC={inti:'var(--g)',gugur:'var(--r)',belum_ada_intel:'var(--a)'};
+const TIERL=()=>({inti:'INTI',gugur:S('GUGUR','OUT'),belum_ada_intel:S('BELUM ADA INTEL','NO INTEL')});
+const safeUrl=u=>typeof u==='string'&&/^https:\/\//i.test(u)?u:null;
+function redraw(){if(typeof M!=='undefined'&&M[cur]&&M[cur].k==='cacing'){const y=scrollY;draw();scrollTo(0,y)}}
+window.cacLoad=async function(force){
+  if(CAC.st==='loading')return;
+  if(!force&&CAC.st==='ok'&&Date.now()-CAC.at<300000)return;
+  CAC.st='loading';CAC.err=null;redraw();
+  try{CAC.data=await api('/api/idx/cacing');CAC.at=Date.now();CAC.st='ok'}
+  catch(e){CAC.st='err';CAC.err=String(e&&e.message||e)}
+  redraw();
+};
+window.cacTog=function(c){CAC.open=CAC.open===c?null:c;redraw()};
+window.cacFlt=function(f){CAC.flt=f;redraw()};
+function detail(c){
+  const i=c.intel,l=c.liquidity||{},fc=c.floatCheck||{},parts=[];
+  if(c.reasons&&c.reasons.length)parts.push(`<div><b class="r">${S('Alasan gugur','Reasons out')}:</b> ${c.reasons.map(ESC).join('; ')}</div>`);
+  if(c.warnings&&c.warnings.length)parts.push(`<div><b style="color:var(--a)">${S('Peringatan','Warnings')}:</b> ${c.warnings.map(ESC).join('; ')}</div>`);
+  parts.push(`<div class="m">${S('Harga','Price')} ${ESC(c.close)} | PBV ${ESC(c.pbv)} | ${S('Harga/NAV','Price/NAV')} ${ESC(c.priceToNav)} | ${S('Liabilitas','Liabilities')} Rp${ESC(c.liabilitiesBn)} M | ${S('Ekuitas','Equity')} Rp${ESC(c.equityBn)} M</div>`);
+  parts.push(`<div class="m">${S('Likuiditas','Liquidity')}: ${ESC(l.status)} | ${S('nilai','value')} ${idr(l.valueIdr)} | vol ${ESC(l.volume)} | freq ${ESC(l.frequency)} | ${S('data tanggal','data date')} ${ESC(String(l.lastDate||'').slice(0,10))} | unit: ${ESC(l.unitCheck)}</div>`);
+  parts.push(`<div class="m">${S('Cek float','Float check')}: TradingView ${pct(fc.tradingview)} | Pasardana ${pct(fc.pasardana)} | IDX ${pct(fc.idxPublic)} | ${S('selisih','gap')} ${isN(fc.gapPts)?fc.gapPts+' poin':'—'}${fc.flag?' <span style="color:var(--a)">⚑ '+ESC(fc.flag)+'</span>':''}</div>`);
+  if(i){
+    parts.push(`<div class="m">${S('Intel IDX','IDX intel')}: ${S('laporan keuangan','fin. statements')} ${ESC(i.fsDate)} | DER ${ESC(i.der)} | ${S('diterima','received')} ${wib(i.receivedAt)}</div>`);
+    if(i.holders&&i.holders.length)parts.push(`<div style="margin-top:4px">${i.holders.map(h=>`<div class="row" style="grid-template-columns:1fr 70px"><span>${ESC(h.nama)} <span class="m">(${ESC(h.kategori)})</span></span><span>${pct(h.pct,2)}</span></div>`).join('')}</div>`);
+    if(i.announcements&&i.announcements.length)parts.push(`<div style="margin-top:6px"><b>${S('Pengumuman','Announcements')}</b> <span class="m">(${S('judul bukan konfirmasi; baca PDF','titles are not confirmation; read the PDF')})</span>${i.announcements.map(a=>{const u=safeUrl(a.pdf);return `<div>${ESC(a.date)} <span class="m">[${ESC(a.level)}]</span> ${u?`<a href="${ESC(u)}" target="_blank" rel="noopener noreferrer" style="color:var(--c)">${ESC(a.title)}</a>`:ESC(a.title)}</div>`}).join('')}</div>`);
+  }else parts.push(`<div class="m">${S('Belum ada intel IDX untuk emiten ini (jalankan kolektor).','No IDX intel for this issuer yet (run the collector).')}</div>`);
+  return parts.join('');
+}
+window.cacHtml=function(){
+  if(CAC.st==='idle'||(CAC.st==='ok'&&Date.now()-CAC.at>300000))setTimeout(()=>window.cacLoad(),0);
+  const head=`<div class="bar"><h2>${S('Cacing-Naga — Daftar Pantauan','Worm-Dragon — Watchlist')} <small class="livb">${S('DATA NYATA','LIVE DATA')}</small></h2><div class="cacbtn"><button onclick="cacLoad(true)">${S('Muat ulang','Reload')}</button></div></div>`;
+  if(CAC.st==='err')return head+`<div class="card"><b class="r">${S('Gagal memuat dari backend','Failed to load from backend')}</b><div class="m">${ESC(CAC.err)}</div><div class="m" style="margin-top:6px">${S('Periksa Pages Function /api dan secret API_TOKEN di proyek Pages.','Check the /api Pages Function and the API_TOKEN secret in the Pages project.')}</div></div>`;
+  const d=CAC.data;
+  if(!d)return head+`<div class="card m">${S('Memuat data dari backend…','Loading data from backend…')}</div>`;
+  const j=d.judgement||{},t=j.tiers||{},rules=j.rules||{},lq=d.liquidity||{},cs=d.candidates||[];
+  const stale=(iso,h)=>ageH(iso)>h?' style="color:var(--a)"':'';
+  const meta=`<div class="card"><div class="ph">${S('Sumber dan waktu data','Sources and data time')}</div>
+   <div${stale(d.computedAt,36)}>${S('Saringan TradingView','TradingView screen')}: ${wib(d.computedAt)} <span class="m">(${ago(d.computedAt)})</span></div>
+   <div${stale(lq.asOf,36)}>${S('Likuiditas Pasardana','Pasardana liquidity')}: ${wib(lq.asOf)} <span class="m">(${ago(lq.asOf)})</span>${lq.error?` <span class="r">${ESC(lq.error)}</span>`:''}</div>
+   <div>${S('Intel IDX (kolektor)','IDX intel (collector)')}: ${wib(j.intelUpdatedAt)} <span class="m">(${ago(j.intelUpdatedAt)})</span>${j.intelError?` <span class="r">${ESC(j.intelError)}</span>`:''}</div>
+   <div class="m">${S('Diambil di browser','Fetched in browser')}: ${wib(new Date(CAC.at).toISOString())}${CAC.st==='loading'?' · '+S('memuat ulang…','reloading…'):''}</div>
+   <div class="m" style="margin-top:6px">${ESC(j.note||d.note||'')}</div>
+   <div class="m" style="margin-top:6px">${S('Aturan','Rules')}: ${S('kapitalisasi','market cap')} &lt; Rp${ESC(d.params&&d.params.marketCapMaxBn)} M · DER ≤ ${ESC(rules.derMax)} · ${S('publik','public')} ≤ ${ESC(rules.publicMaxPct)}% · owner ${ESC(rules.ownerMinPct)}–${ESC(rules.ownerMaxPct)}% · ${S('return 1 th','1y return')} &gt; ${isN(rules.oneYearDropLimit)?Math.round(rules.oneYearDropLimit*100):'?'}%</div></div>`;
+  const tl=TIERL();
+  const tiles=`<div class="tiles" style="margin-bottom:14px">${['inti','belum_ada_intel','gugur'].map(k=>`<div class="tile" style="background:var(--p);border:1px solid var(--b)"><b style="color:${TIERC[k]}">${ESC(t[k]==null?0:t[k])}</b>${tl[k]}</div>`).join('')}</div>`;
+  const chips=[['inti',`INTI (${t.inti||0})`],['gugur',`${tl.gugur} (${t.gugur||0})`],['belum_ada_intel',`${tl.belum_ada_intel} (${t.belum_ada_intel||0})`],['all',S(`SEMUA (${cs.length})`,`ALL (${cs.length})`)]];
+  const flt=`<div class="cacf" style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px">${chips.map(([k,l])=>`<span class="chip ${CAC.flt===k?'on':''}" onclick="cacFlt('${k}')">${ESC(l)}</span>`).join('')}</div>`;
+  const rows=cs.filter(c=>CAC.flt==='all'||c.tier===CAC.flt);
+  const th=['CODE',S('TINGKAT','TIER'),S('KAP (Rp M)','CAP (Rp B)'),'DER',S('PUBLIK','PUBLIC'),'OWNER',S('PEMEGANG TERBESAR','TOP HOLDER'),S('RETURN 1TH','1Y RET'),S('TRANSAKSI/HARI','VALUE/DAY')];
+  const tr=rows.map(c=>{
+    const i=c.intel,l=c.liquidity||{},a=i&&i.adjusted,top=i&&i.topHolder,oy=l.oneYear,open=CAC.open===c.code;
+    const der=i&&isN(i.der)?i.der:c.derIdx;
+    const main=`<tr class="cr" data-c="${ESC(c.code)}" onclick="cacTog(this.dataset.c)"><td><b style="color:var(--w)">${ESC(c.code)}</b><br><span class="m" style="font-size:12px">${ESC(c.name||'')}</span></td><td><span class="badge" style="background:${TIERC[c.tier]||'var(--m)'}">${ESC(tl[c.tier]||c.tier)}</span></td><td>${ESC(c.marketCapBn)}</td><td>${ESC(der)}</td><td>${pct(a&&a.publicPct)}</td><td>${pct(a&&a.ownerPct)}</td><td style="text-align:left">${top?ESC(top.name)+' '+pct(top.pct):'—'}</td><td class="${isN(oy)?(oy>-0.4?(oy>=0?'g':''):'r'):'m'}">${isN(oy)?(oy>=0?'+':'')+Math.round(oy*100)+'%':'—'}</td><td${l.status&&l.status!=='ok'?' style="color:var(--a)"':''}>${idr(l.valueIdr)}</td></tr>`;
+    return main+(open?`<tr class="cacd"><td colspan="9">${detail(c)}</td></tr>`:'');
+  }).join('');
+  const table=`<div class="card tbl"><table><tr class="m">${th.map(x=>`<th>${x}</th>`).join('')}</tr>${tr||`<tr><td colspan="9" class="m">${S('Tidak ada emiten pada filter ini.','No issuers in this filter.')}</td></tr>`}</table><div class="m" style="margin-top:8px">${S('Klik baris untuk rincian. Daftar pantauan, bukan sinyal beli; bukan nasihat investasi.','Click a row for details. Watchlist, not a buy signal; not investment advice.')}</div></div>`;
+  return head+meta+tiles+flt+table;
+};
+async function hlLoad(){
+  try{HL.data=await api('/api/health');HL.st='ok'}catch(e){HL.st='err';HL.err=String(e&&e.message||e)}
+  HL.at=Date.now();hlPaint();
+}
+function hlPaint(){
+  const el=document.getElementById('lvt');if(!el)return;
+  let color='var(--m)',txt='…',tip='';
+  if(HL.st==='ok'){
+    const bad=((HL.data&&HL.data.crons)||[]).filter(c=>c.state==='basi'||c.state==='gagal');
+    if(HL.data&&HL.data.status==='healthy'){color='var(--g)';txt='LIVE';tip='Backend sehat'}
+    else{color='var(--a)';txt='DEGRADED';tip='Cron bermasalah: '+bad.map(c=>c.name+' ('+c.state+')').join(', ')}
+  }else if(HL.st==='err'){color='var(--r)';txt='OFFLINE';tip=HL.err||''}
+  el.innerHTML=`<span style="color:${color}">●</span> ${txt}`;el.title=tip;
+}
+window.hlLoad=hlLoad;
+hlLoad();setInterval(hlLoad,60000);
+})();
+</script>
+<script>
+(function(){
+const ESC=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const RD=window.RD={st:'idle',ov:null,nw:null,at:0,err:null};
+const isN=v=>typeof v==='number'&&isFinite(v);
+async function api(path){const r=await fetch(path,{cache:'no-store'});if(!r.ok){let m='';try{m=(await r.json()).error||''}catch(_e){}throw new Error('HTTP '+r.status+(m?': '+m:''))}return r.json()}
+const q=id=>RD.ov&&Array.isArray(RD.ov.quotes)?RD.ov.quotes.find(x=>x.id===id&&x.ok===true)||null:null;
+const nf=v=>isN(v)?v.toLocaleString('en-US',{maximumFractionDigits:Math.abs(v)<10?4:2}):'—';
+const rr=v=>Math.round(v*10)/10;
+const sp=v=>isN(v)?(rr(v)>0?'+':'')+(rr(v)===0?'0.0':rr(v).toFixed(1))+'%':'—';
+const cls=v=>!isN(v)?'m':rr(v)>0?'g':rr(v)<0?'r':'m';
+const wib=iso=>{const d=new Date(iso);if(isNaN(d))return '—';return d.toLocaleString('id-ID',{timeZone:'Asia/Jakarta',hour12:false,day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+' WIB'};
+const hm=iso=>{const d=new Date(iso);if(isNaN(d))return '--:--';return d.toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour12:false,hour:'2-digit',minute:'2-digit'}).replace('.',':')};
+const ageH=iso=>{const t=Date.parse(iso);return isFinite(t)?(Date.now()-t)/3600000:Infinity};
+const ago=iso=>{const h=ageH(iso);if(!isFinite(h))return '';return h<1?Math.max(1,Math.round(h*60))+' mnt':h<48?Math.round(h)+' jam':Math.round(h/24)+' hari'};
+const safeUrl=u=>typeof u==='string'&&/^https:\/\//i.test(u)?u:null;
+function redraw(){if(typeof M!=='undefined'&&M[cur]&&(M[cur].k==='home'||M[cur].k==='pasar')){const y=scrollY;draw();scrollTo(0,y)}}
+window.rdLoad=async function(force){
+  if(RD.st==='loading')return;
+  if(!force&&RD.st==='ok'&&Date.now()-RD.at<240000)return;
+  RD.st='loading';
+  try{
+    const [ov,nw]=await Promise.all([api('/api/market/overview'),api('/api/market/news').catch(e=>({error:String(e&&e.message||e),items:[]}))]);
+    RD.ov=ov;RD.nw=nw;RD.at=Date.now();RD.st='ok';RD.err=null;
+  }catch(e){RD.st='err';RD.err=String(e&&e.message||e)}
+  redraw();
+};
+/* ---------- Beranda: panel nyata (label sama dengan kamus tooltip IT) ---------- */
+function row(label,id,fmt){const x=q(id);if(!x)return [label,'…','—'];return fmt?fmt(x,label):[label,nf(x.price),sp(x.perf&&x.perf.d1)]}
+const yld=(x,label)=>{const c=x.closes||[],n=c.length;const bps=n>=2?Math.round((c[n-1]-c[n-2])*100):null;return [label,nf(x.price)+'%',bps===null?'—':(bps>0?'+':'')+bps+'bps']};
+window.RDROWS=function(kind){
+  if(kind==='fx')return [row('USD/IDR','USDIDR'),row('EUR/USD','EURUSD'),row('USD/JPY','USDJPY'),row('DXY','DXY')];
+  if(kind==='cmd'){const y=RD.ov&&RD.ov.yields&&RD.ov.yields.id10y;return [row('XAU/oz','XAU'),row('WTI/bbl','WTI'),row('US 10Y','US10Y',yld),y&&isN(y.close)?['ID 10Y',nf(y.close)+'%','—']:['ID 10Y','…','—']]}
+  return [row('IHSG','ID'),row('S&P500','US'),row('BTC/USD','BTC'),row('ETH/USD','ETH')];
+};
+function newsItems(){return RD.nw&&Array.isArray(RD.nw.items)?RD.nw.items:[]}
+window.wireCard=function(){
+  const it=newsItems().slice(0,8);
+  const body=it.length?it.map(n=>{const u=safeUrl(n.link);const t=ESC(n.title);return `<div class="row" style="grid-template-columns:50px 92px 1fr"><span class="m">${hm(n.time)}</span><span style="color:var(--c)">[${ESC(n.source)}]</span><span data-side="1">${u?`<a href="${ESC(u)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${t}</a>`:t}</span></div>`}).join(''):`<div class="m">${RD.st==='err'?ESC(RD.err):'Memuat berita…'}</div>`;
+  return `<div class="card"><div class="ph">WIRE &lt;NWS&gt; — MAB NEWS WIRE <small class="livb">${S('DATA NYATA','LIVE DATA')}</small></div>${body}<div class="m" style="margin-top:6px">${S('Judul RSS media Indonesia (CNBC, CNN, Liputan6, Antara, Tempo, IDX Channel). Bukan konfirmasi; baca sumbernya.','Headlines from Indonesian media RSS. Not confirmation; read the source.')}</div></div>`;
+};
+window.sgnCard=function(){
+  const all=(RD.ov&&RD.ov.quotes||[]).filter(x=>x.ok===true&&x.id!=='US10Y'&&x.perf&&isN(x.perf.d1)).sort((a,b)=>b.perf.d1-a.perf.d1);
+  const top=all.slice(0,2),bot=all.slice(-3).reverse();
+  const li=x=>`<div><span class="${x.perf.d1>=0?'g':'r'}">${x.perf.d1>=0?'▲':'▼'}</span> ${ESC(x.label)} ${sp(x.perf.d1)}</div>`;
+  return `<div class="card"><div class="ph"><span>SGN &lt;ALERT&gt; — ${S('PERGERAKAN TERBESAR','BIGGEST MOVERS')}</span> <small class="livb">${S('DATA NYATA','LIVE DATA')}</small></div>${all.length?top.map(li).join('')+bot.map(li).join('')+`<div class="m" style="margin-top:4px">${S('Perubahan harian terakhir (sesi terakhir tiap pasar).','Latest daily change (each market\'s last session).')}</div>`:'<div class="m">…</div>'}<div class="m" style="margin-top:8px;color:var(--a)">${S('Panel MAP, SUM, dan KETERANGAN di halaman ini SIMULASI: arus dana per kawasan tidak punya sumber gratis. Yang nyata: Kurs, Komoditas, Saham/Kripto, kartu ini, dan Wire. Lihat menu Pasar (Data Nyata).','The MAP, SUM, and EXPLANATION panels on this page are SIMULATED: regional fund flows have no free source. Real: FX, Commodities, Equities/Crypto, this card, and Wire. See the Market (Live Data) menu.')}</div></div>`;
+};
+window.simBadge=function(m){return m.k==='home'?`<small class="simb">${S('CAMPURAN','MIXED')}</small>`:`<small class="simb">${S('DATA SIMULASI','SIMULATED DATA')}</small>`};
+window.simTag=()=>`<small class="simb">${S('SIMULASI','SIMULATED')}</small>`;
+/* ---------- Halaman Pasar (Data Nyata) ---------- */
+function trendSvg(ov){
+  const regs=(ov.quotes||[]).filter(x=>x.group==='index'&&x.ok===true&&Array.isArray(x.closes)&&Array.isArray(x.times)&&x.closes.length>1);
+  if(regs.length<2)return '';
+  const dk=t=>new Date(t*1000).toISOString().slice(0,10);
+  const dates=Array.from(new Set(regs.flatMap(r=>r.times.map(dk)))).sort().slice(-40);
+  const series=regs.map(r=>{const byD=new Map();r.times.forEach((t,i)=>byD.set(dk(t),r.closes[i]));let last=null;const arr=dates.map(d=>{if(byD.has(d))last=byD.get(d);return last});const base=arr.find(v=>v!==null);return {id:r.id,label:r.label,vals:arr.map(v=>v===null||!base?null:v/base*100)}});
+  const all=series.flatMap(s=>s.vals).filter(v=>v!==null);const lo=Math.min(...all,100),hi=Math.max(...all,100),pad=(hi-lo)*.08||1,y0=lo-pad,y1=hi+pad;
+  const W=640,H=260,L=44,R=12,T=10,B=26,X=i=>L+(W-L-R)*i/(dates.length-1),Y=v=>T+(H-T-B)*(1-(v-y0)/(y1-y0));
+  const grid=[0,.25,.5,.75,1].map(f=>{const v=y0+(y1-y0)*f;return `<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#ffffff14"/><text x="${L-6}" y="${Y(v)+4}" text-anchor="end" fill="#9a8f7e" font-size="11">${v.toFixed(0)}</text>`}).join('');
+  const base100=`<line x1="${L}" x2="${W-R}" y1="${Y(100)}" y2="${Y(100)}" stroke="#ffffff40" stroke-dasharray="4 4"/>`;
+  const lines=series.map((s,k)=>{const pts=s.vals.map((v,i)=>v===null?null:`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).filter(Boolean).join(' ');return `<polyline fill="none" stroke="${PL[k%PL.length]}" stroke-width="2" points="${pts}"><title>${ESC(s.label)}</title></polyline>`}).join('');
+  const xl=`<text x="${L}" y="${H-6}" fill="#9a8f7e" font-size="11">${dates[0]}</text><text x="${W-R}" y="${H-6}" text-anchor="end" fill="#9a8f7e" font-size="11">${dates[dates.length-1]}</text>`;
+  const legend=series.map((s,k)=>{const lv=[...s.vals].reverse().find(v=>v!==null);return `<span style="margin-right:14px;white-space:nowrap"><span style="color:${PL[k%PL.length]}">●</span> ${ESC(s.id)} <span class="${cls(lv-100)}">${isN(lv)?sp(lv-100):'—'}</span></span>`}).join('');
+  return `<div class="card"><div class="ph">${S('TREN 40 HARI BURSA (AWAL = 100)','40 TRADING DAYS TREND (START = 100)')} <small class="livb">${S('DATA NYATA','LIVE DATA')}</small></div><div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" style="min-width:520px;width:100%;height:auto">${grid}${base100}${lines}${xl}</svg></div><div style="margin-top:6px">${legend}</div><div class="m" style="margin-top:6px">${S('Indeks utama tiap kawasan, penutupan harian, disejajarkan menurut tanggal (nilai terakhir dibawa maju saat bursa libur). Bukan arus dana.','Main index per region, daily closes, aligned by date (last value carried forward on holidays). Not fund flows.')}</div></div>`;
+}
+const GROUPS=()=>[['index',S('Indeks kawasan','Regional indices')],['fx',S('Kurs','FX')],['cmdty',S('Komoditas dan yield','Commodities and yields')],['crypto',S('Kripto','Crypto')],['us',S('Saham AS','US stocks')],['id',S('Saham Indonesia','Indonesian stocks')]];
+function groupTable(ov,g,title){
+  let rows=(ov.quotes||[]).filter(x=>x.group===g);
+  const cells=x=>{
+    if(x.ok!==true)return `<tr><td><b style="color:var(--w)">${ESC(x.label)}</b></td><td colspan="6" class="r">${ESC(x.error||'tidak tersedia')}</td></tr>`;
+    const p=x.perf||{};const old=ageH(x.asOf)>36;
+    return `<tr><td><b style="color:var(--w)">${ESC(x.label)}</b><br><span class="m" style="font-size:12px">${ESC(x.symbol)}</span></td><td>${nf(x.price)}${x.group==='cmdty'&&x.id==='US10Y'?'%':''} <span class="m" style="font-size:12px">${ESC(x.currency||'')}</span></td><td class="${cls(p.d1)}">${sp(p.d1)}</td><td class="${cls(p.w1)}">${sp(p.w1)}</td><td class="${cls(p.m1)}">${sp(p.m1)}</td><td class="${cls(p.m3)}">${sp(p.m3)}</td><td style="text-align:left${old?';color:var(--a)':''}">${wib(x.asOf)}<br><span class="m" style="font-size:12px">${ago(x.asOf)} ${S('lalu','ago')}</span></td></tr>`;
+  };
+  let extra='';
+  if(g==='cmdty'){const y=ov.yields&&ov.yields.id10y;if(y&&isN(y.close))extra=`<tr><td><b style="color:var(--w)">ID 10Y (%)</b><br><span class="m" style="font-size:12px">TVC:ID10Y</span></td><td>${nf(y.close)}%</td><td class="m">—</td><td class="m">—</td><td class="m">—</td><td class="m">—</td><td style="text-align:left" class="m">TradingView</td></tr>`}
+  return `<div class="card tbl"><div class="ph">${title}</div><table><tr class="m"><th>${S('INSTRUMEN','INSTRUMENT')}</th><th>${S('HARGA','PRICE')}</th><th>${S('1 HARI','1D')}</th><th>${S('1 MGG','1W')}</th><th>${S('1 BLN','1M')}</th><th>${S('3 BLN','3M')}</th><th>${S('WAKTU DATA','DATA TIME')}</th></tr>${rows.map(cells).join('')}${extra}</table></div>`;
+}
+window.pasarHtml=function(){
+  if(RD.st==='idle'||(RD.st==='ok'&&Date.now()-RD.at>300000))setTimeout(()=>window.rdLoad(),0);
+  const head=`<div class="bar"><h2>${S('Pasar — Data Nyata','Market — Live Data')} <small class="livb">${S('DATA NYATA','LIVE DATA')}</small></h2><div class="cacbtn"><button onclick="rdLoad(true)">${S('Muat ulang','Reload')}</button></div></div>`;
+  if(RD.st==='err'&&!RD.ov)return head+`<div class="card"><b class="r">${S('Gagal memuat dari backend','Failed to load from backend')}</b><div class="m">${ESC(RD.err)}</div></div>`;
+  const ov=RD.ov;
+  if(!ov)return head+`<div class="card m">${S('Memuat data pasar…','Loading market data…')}</div>`;
+  const nw=newsItems();
+  const meta=`<div class="card"><div class="ph">${S('Sumber dan waktu data','Sources and data time')}</div><div>${S('Harga dan deret harian','Prices and daily series')}: Yahoo Finance · ${S('yield ID 10Y','ID 10Y yield')}: TradingView</div><div>${S('Dibangun backend','Built by backend')}: ${wib(ov.builtAt)} <span class="m">(${ago(ov.builtAt)} ${S('lalu','ago')})</span> · ${ov.okCount}/${ov.total} ${S('simbol berhasil','symbols ok')}${ov.cache==='stale'?` · <span style="color:var(--a)">${S('CACHE LAMA','STALE CACHE')}</span>`:''}</div><div class="m">${S('Diambil di browser','Fetched in browser')}: ${wib(new Date(RD.at).toISOString())}${RD.st==='loading'?' · '+S('memuat ulang…','reloading…'):''}</div><div class="m" style="margin-top:6px">${ESC(ov.note||'')} ${S('Waktu data tiap angka tertera; kolom kuning = lebih dari 36 jam (pasar tutup/libur).','Each number shows its data time; amber = older than 36 hours (market closed/holiday).')}</div></div>`;
+  const news=`<div class="card"><div class="ph">WIRE &lt;NWS&gt; — ${S('BERITA TERKINI','LATEST NEWS')} <small class="livb">${S('DATA NYATA','LIVE DATA')}</small></div>${nw.length?nw.slice(0,30).map(n=>{const u=safeUrl(n.link);const t=ESC(n.title);return `<div class="row" style="grid-template-columns:110px 112px 1fr"><span class="m">${wib(n.time)}</span><span style="color:var(--c)">${ESC(n.source)}</span><span>${n.corporateAction?`<span class="badge" style="background:var(--a);margin-right:6px">${S('AKSI KORPORASI','CORP. ACTION')}</span>`:''}${u?`<a href="${ESC(u)}" target="_blank" rel="noopener noreferrer" style="color:inherit">${t}</a>`:t}</span></div>`}).join(''):`<div class="m">${RD.nw&&RD.nw.error?ESC(RD.nw.error):S('Belum ada berita.','No news yet.')}</div>`}<div class="m" style="margin-top:6px">${S('Judul dari RSS media Indonesia, bukan kawat berita global. Bukan konfirmasi; baca sumbernya.','Headlines from Indonesian media RSS, not a global wire. Not confirmation; read the source.')}${RD.nw&&Array.isArray(RD.nw.feedErrors)&&RD.nw.feedErrors.length?` · <span style="color:var(--a)">${ESC(RD.nw.feedErrors.join('; '))}</span>`:''}</div></div>`;
+  return head+meta+trendSvg(ov)+GROUPS().map(([g,t])=>groupTable(ov,g,t)).join('')+news;
+};
+rdLoad();setInterval(()=>rdLoad(),300000);
+})();
+</script>
+<script>
 const H=s=>{let h=2166136261;for(const c of s)h=Math.imul(h^c.charCodeAt(0),16777619);return h>>>0};
 const RN=s=>{let a=H(s+tf+(pr?'P'+(res?res.e+res.v:'')+hz:'')+(rt?Math.floor(Date.now()/5000):''));return()=>(a=Math.imul(a^a>>>15,2246822519)>>>0,(a%10000)/10000)};
 const ser=(s,b,n=80)=>{const r=RN(s);let v=b;return Array.from({length:n},()=>v*=1+(r()-.48)*.03)};
@@ -44,6 +227,7 @@ const CUR=['USD','EUR','JPY','GBP','IDR','AUD','CHF'];
 const M=[
 {id:'home',t:'Beranda',k:'home'},
 {id:'cac',t:'Cacing-Naga (Data Nyata)',k:'cacing'},
+{id:'pasar',t:'Pasar (Data Nyata)',k:'pasar'},
 {id:'radar',t:'Radar Arus Dana Global',k:'flow',i:['Amerika','Eropa','Asia','Indonesia','Emas','Crypto','Obligasi','Komoditas']},
 {id:'id',t:'Saham Indonesia',k:'price',i:[['BBCA',9800],['BBRI',4600],['BMRI',5200],['TLKM',3100],['ASII',5000],['GOTO',70]]},
 {id:'us',t:'Saham Amerika',k:'price',i:[['AAPL',230],['NVDA',140],['MSFT',430],['TSLA',250],['AMZN',190]]},
@@ -74,7 +258,7 @@ function setSty(k){sty=sty==k?-1:k;fixTf();rr()}
 function setLg(l){LG=l;draw()}
 const panel=()=>`<div class="card fpn"><div class="ph">${S('Filter Waktu','Time Filter')}</div><div class="tabs">${Object.keys(UN).map(u=>`<span class="${un==u?'on':''}" onclick="setUn('${u}')">${UN[u][L2()]}</span>`).join('')}</div><div class="ph">${S('Gaya Trading / Investasi','Trading / Investing Style')}</div><div class="tabs">${STY.map((s,k)=>`<span class="${sty==k?'on':''}" onclick="setSty(${k})">${S(s[0],s[1])}</span>`).join('')}</div><button class="vb" onclick="un='';sty=-1;fixTf();draw()">Reset/Default</button></div>`;
 function tfRow(){const v=vis();return `<div class="tf"><button class="vb ic ${fp||un||sty>=0?'on':''}" onclick="fp=!fp;draw()" aria-label="Filter"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg></button><div class="tfs"><span class="chip rt ${rt?'on':''}" data-tip="${S('Data langsung, diperbarui tiap 5 detik','Live data, refreshes every 5 seconds')}" onclick="rt=!rt;draw()">${S('Waktu Nyata','Real Time')}</span>${v.map(i=>`<span class="chip ${!rt&&i==tf?'on':''}" data-tip="${tfTip(i)}" onclick="setTf(${i})">${tfLab(i)}</span>`).join('')||`<span class="m">${S('Tidak ada rentang yang cocok','No matching range')}</span>`}<span class="chip" ${D(LGD(),LGD())}>?</span></div></div>${fp?panel():''}`}
-const DI={'Beranda':'Home','Cacing-Naga (Data Nyata)':'Worm-Dragon (Live Data)','Radar Arus Dana Global':'Global Capital Flow Radar','Saham Indonesia':'Indonesian Stocks','Saham Amerika':'US Stocks','Berita Terkini / Wire News':'Latest News / Wire News','Rotasi Modal Risk-On / Risk-Off':'Risk-On / Risk-Off Capital Rotation','Arus Uang Forex':'Forex Money Flow','Kekuatan Aliran':'Flow Strength','Rotasi Multi-Rentang Waktu':'Multi-Timeframe Rotation','Arus Aset Global':'Global Asset Flow','Rotasi Sektor Global':'Global Sector Rotation','Perpindahan Modal Antar Sektor':'Cross-Sector Capital Movement','Alokasi Pasar':'Market Allocation','Monitor Likuiditas':'Liquidity Monitor','Tabel Multidata':'Multi-Data Table','Grafik Nilai':'Value Chart','Grafik':'Chart','Diagram Alir':'Flow Diagram','Analisa Pakar':'Expert Analysis','Kalimasada (Akademi Crypto)':'Kalimasada (Crypto Academy)','Analisa Baseline MA/RSI (Pembanding)':'Baseline MA/RSI Analysis (Benchmark)','Cacing-Naga':'Worm-Dragon','Gabungan':'Combined','Tren 40 Periode (indeks=100)':'40-Period Trend (index=100)','KELUAR':'OUTFLOW','MASUK':'INFLOW','Modal':'Capital','Kas':'Cash','Amerika':'Americas','Eropa':'Europe','Saham AS':'US Stocks','Saham ID':'ID Stocks','Saham':'Stocks','Emas':'Gold','Obligasi':'Bonds','Komoditas':'Commodities','Kripto':'Crypto','Minyak':'Oil','Properti':'Real Estate','Teknologi':'Technology','Keuangan':'Financials','Energi':'Energy','Kesehatan':'Healthcare','Industri':'Industrials','Konsumer':'Consumer','Utilitas':'Utilities','Telekomunikasi':'Telecom','Neraca Fed':'Fed Balance Sheet','Pertumbuhan M2':'M2 Growth','Likuiditas Bank':'Bank Liquidity','Spread Kredit':'Credit Spread','keyakinan':'confidence','Logika engine di sini placeholder demo; bukan saran investasi.':'Engine logic here is a demo placeholder; not investment advice.','Posisi dalam range':'Position in range','Level baku':'Standard levels','Rasio HAKA':'HAKA ratio','(snapshot tape simulasi)':'(simulated tape snapshot)','Diskon vs SMA50':'Discount vs SMA50','(proxy nilai wajar)':'(fair-value proxy)','Cacing: range 20 periode':'Worm: 20-period range','Naga:':'Dragon:','breakout dekat/di atas high 40 periode':'breakout near/above 40-period high','belum breakout':'no breakout yet','murah':'cheap','mahal':'expensive','wajar':'fair','terkonfirmasi':'confirmed','belum':'not yet','Entri hanya jika kedua sinyal selaras':'Entry only if both signals align','Garis putus: SMA20':'Dashed line: SMA20','Skor arus relatif':'Relative flow score','Headline contoh; di produksi dari /api/news (RSS/Finnhub/CryptoPanic).':'Sample headlines; in production from /api/news (RSS/Finnhub/CryptoPanic).','Data contoh/simulasi.':'Sample/simulated data.',' mnt':' min','Fed isyaratkan jalur suku bunga data-dependent':'Fed signals data-dependent rate path','IHSG ditutup menguat didorong sektor perbankan':'IHSG closes higher, led by banking sector','Harga emas dekat rekor, dolar melemah':'Gold near record, dollar weakens','Bitcoin konsolidasi, aliran ETF masuk':'Bitcoin consolidates, ETF inflows continue','Minyak turun di tengah data stok AS':'Oil falls amid US inventory data','Rupiah stabil jelang rilis data inflasi':'Rupiah steady ahead of inflation data','Arus asing beli saham Rp812M; bank umum & energi jadi incaran':'Foreign flows buy Rp812M of stocks; major banks & energy in focus','Dana global flowing ke EM +$2.1M/minggu — tertinggi 3 bulan':'Global funds flowing into EM +$2.1M/week — 3-month high','Yield 10Y AS naik 3bps; pasar antre data inflasi pekan depan':'US 10Y yield up 3bps; market awaits inflation data next week','Outflow Tiongkok pekan ke-6; yuan tertekan di 7.28':'China outflow for 6th week; yuan pressured at 7.28','Petro-dollar Timur Tengah kembali alokasi ke obligasi EM Asia':'Middle East petrodollars reallocate to EM Asia bonds','BI: cadangan devisa cukup untuk jaga stabilitas rupiah':'BI: FX reserves sufficient to keep rupiah stable','Emas mantap di $2.910 — investor cari lindung nilai geopolitik':'Gold steady at $2,910 — investors seek geopolitical hedge','ARUS DANA GLOBAL 24J':'GLOBAL CAPITAL FLOW 24H','SENTIMEN':'SENTIMENT','ALIRAN UTAMA':'MAIN FLOW','GLOBAL 24J NET FLOW':'GLOBAL 24H NET FLOW','(RT/SAHAM)':'(RETAIL/STOCKS)','SINYAL':'SIGNALS','KURS':'RATES','EMAS & OBLIGASI':'GOLD & BONDS','SAHAM & KRIPTO':'STOCKS & CRYPTO','DXY stabil':'DXY steady','lanjut pekan ke-6':'continues for 6th week','PANTAU: yield naik = tekanan keluar EM':'WATCH: rising yield = EM outflow pressure','Angka Sekarang':'Current Figures','Angka Prediksi':'Predicted Figures','Hasil Perkiraan Analisa Pakar':'Expert Analysis Forecast Result'};
+const DI={'Beranda':'Home','Cacing-Naga (Data Nyata)':'Worm-Dragon (Live Data)','Pasar (Data Nyata)':'Market (Live Data)','Radar Arus Dana Global':'Global Capital Flow Radar','Saham Indonesia':'Indonesian Stocks','Saham Amerika':'US Stocks','Berita Terkini / Wire News':'Latest News / Wire News','Rotasi Modal Risk-On / Risk-Off':'Risk-On / Risk-Off Capital Rotation','Arus Uang Forex':'Forex Money Flow','Kekuatan Aliran':'Flow Strength','Rotasi Multi-Rentang Waktu':'Multi-Timeframe Rotation','Arus Aset Global':'Global Asset Flow','Rotasi Sektor Global':'Global Sector Rotation','Perpindahan Modal Antar Sektor':'Cross-Sector Capital Movement','Alokasi Pasar':'Market Allocation','Monitor Likuiditas':'Liquidity Monitor','Tabel Multidata':'Multi-Data Table','Grafik Nilai':'Value Chart','Grafik':'Chart','Diagram Alir':'Flow Diagram','Analisa Pakar':'Expert Analysis','Kalimasada (Akademi Crypto)':'Kalimasada (Crypto Academy)','Analisa Baseline MA/RSI (Pembanding)':'Baseline MA/RSI Analysis (Benchmark)','Cacing-Naga':'Worm-Dragon','Gabungan':'Combined','Tren 40 Periode (indeks=100)':'40-Period Trend (index=100)','KELUAR':'OUTFLOW','MASUK':'INFLOW','Modal':'Capital','Kas':'Cash','Amerika':'Americas','Eropa':'Europe','Saham AS':'US Stocks','Saham ID':'ID Stocks','Saham':'Stocks','Emas':'Gold','Obligasi':'Bonds','Komoditas':'Commodities','Kripto':'Crypto','Minyak':'Oil','Properti':'Real Estate','Teknologi':'Technology','Keuangan':'Financials','Energi':'Energy','Kesehatan':'Healthcare','Industri':'Industrials','Konsumer':'Consumer','Utilitas':'Utilities','Telekomunikasi':'Telecom','Neraca Fed':'Fed Balance Sheet','Pertumbuhan M2':'M2 Growth','Likuiditas Bank':'Bank Liquidity','Spread Kredit':'Credit Spread','keyakinan':'confidence','Logika engine di sini placeholder demo; bukan saran investasi.':'Engine logic here is a demo placeholder; not investment advice.','Posisi dalam range':'Position in range','Level baku':'Standard levels','Rasio HAKA':'HAKA ratio','(snapshot tape simulasi)':'(simulated tape snapshot)','Diskon vs SMA50':'Discount vs SMA50','(proxy nilai wajar)':'(fair-value proxy)','Cacing: range 20 periode':'Worm: 20-period range','Naga:':'Dragon:','breakout dekat/di atas high 40 periode':'breakout near/above 40-period high','belum breakout':'no breakout yet','murah':'cheap','mahal':'expensive','wajar':'fair','terkonfirmasi':'confirmed','belum':'not yet','Entri hanya jika kedua sinyal selaras':'Entry only if both signals align','Garis putus: SMA20':'Dashed line: SMA20','Skor arus relatif':'Relative flow score','Headline contoh; di produksi dari /api/news (RSS/Finnhub/CryptoPanic).':'Sample headlines; in production from /api/news (RSS/Finnhub/CryptoPanic).','Data contoh/simulasi.':'Sample/simulated data.',' mnt':' min','Fed isyaratkan jalur suku bunga data-dependent':'Fed signals data-dependent rate path','IHSG ditutup menguat didorong sektor perbankan':'IHSG closes higher, led by banking sector','Harga emas dekat rekor, dolar melemah':'Gold near record, dollar weakens','Bitcoin konsolidasi, aliran ETF masuk':'Bitcoin consolidates, ETF inflows continue','Minyak turun di tengah data stok AS':'Oil falls amid US inventory data','Rupiah stabil jelang rilis data inflasi':'Rupiah steady ahead of inflation data','Arus asing beli saham Rp812M; bank umum & energi jadi incaran':'Foreign flows buy Rp812M of stocks; major banks & energy in focus','Dana global flowing ke EM +$2.1M/minggu — tertinggi 3 bulan':'Global funds flowing into EM +$2.1M/week — 3-month high','Yield 10Y AS naik 3bps; pasar antre data inflasi pekan depan':'US 10Y yield up 3bps; market awaits inflation data next week','Outflow Tiongkok pekan ke-6; yuan tertekan di 7.28':'China outflow for 6th week; yuan pressured at 7.28','Petro-dollar Timur Tengah kembali alokasi ke obligasi EM Asia':'Middle East petrodollars reallocate to EM Asia bonds','BI: cadangan devisa cukup untuk jaga stabilitas rupiah':'BI: FX reserves sufficient to keep rupiah stable','Emas mantap di $2.910 — investor cari lindung nilai geopolitik':'Gold steady at $2,910 — investors seek geopolitical hedge','ARUS DANA GLOBAL 24J':'GLOBAL CAPITAL FLOW 24H','SENTIMEN':'SENTIMENT','ALIRAN UTAMA':'MAIN FLOW','GLOBAL 24J NET FLOW':'GLOBAL 24H NET FLOW','(RT/SAHAM)':'(RETAIL/STOCKS)','SINYAL':'SIGNALS','KURS':'RATES','EMAS & OBLIGASI':'GOLD & BONDS','SAHAM & KRIPTO':'STOCKS & CRYPTO','DXY stabil':'DXY steady','lanjut pekan ke-6':'continues for 6th week','PANTAU: yield naik = tekanan keluar EM':'WATCH: rising yield = EM outflow pressure','Angka Sekarang':'Current Figures','Angka Prediksi':'Predicted Figures','Hasil Perkiraan Analisa Pakar':'Expert Analysis Forecast Result'};
 const KS=Object.keys(DI).sort((a,b)=>b.length-a.length);
 function tr1(s){const T=[];KS.forEach(k=>{if(s.includes(k))s=s.split(k).join('\u0001'+(T.push(DI[k])-1)+'\u0002')});return s.replace(/\u0001(\d+)\u0002/g,(_,i)=>T[i])}
 function trans(root){const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let n;while(n=w.nextNode())n.nodeValue=tr1(n.nodeValue)}
@@ -238,11 +422,11 @@ function home(){
  const hm=pr?(()=>{const[u,n]=HZ[hz];return n*MIN[u]})():(rt?5:tfMin(tf)),one=!pr&&tf==4&&!rt,fz=one?1:Math.pow(hm/1440,.6);reg.forEach(r=>{const j=one?1:.85+RN('hr'+r[0])()*.3;r[1]=Math.max(1,Math.round(r[1]*fz*j));r[2]=Math.max(1,Math.round(r[2]*fz*(2-j)))});
  reg.forEach(r=>{if(pr&&res){const a=analyze(res.e,res.v,{id:'home',k:'home'},r[0],100),d=(a.sig=='BUY'?1:a.sig=='SELL'?-1:0)*(.08+a.conf/700);r[1]=Math.round(r[1]*(1+d));r[2]=Math.max(1,Math.round(r[2]*(1-d)))}});
  LASTREG=reg.map(r=>r.slice());const W=WIRE,W_UNUSED=[['14:31','ID','Arus asing beli saham Rp812M; bank umum & energi jadi incaran'],['14:28','GL','Dana global flowing ke EM +$2.1M/minggu — tertinggi 3 bulan'],['14:22','US','Yield 10Y AS naik 3bps; pasar antre data inflasi pekan depan'],['14:15','CN','Outflow Tiongkok pekan ke-6; yuan tertekan di 7.28'],['14:09','AE','Petro-dollar Timur Tengah kembali alokasi ke obligasi EM Asia'],['14:02','ID','BI: cadangan devisa cukup untuk jaga stabilitas rupiah'],['13:55','GL','Emas mantap di $2.910 — investor cari lindung nilai geopolitik']];
- return `<div class="gr2"><div class="card tbl cur">${curBtn()}<div class="ph"><span ${D('Arus dana global antar kawasan pada periode terpilih ('+cuLab()+')','Global capital flows between regions over the selected period ('+cuLab()+')')}>MAP &lt;GFLOW&gt; — ${S('ARUS DANA GLOBAL','GLOBAL CAPITAL FLOW')} ${pr?predIn():perIn()} ${curUnit()}</span></div><table><tr class="m"><th ${D('Wilayah atau negara asal data arus dana','Region or country the fund-flow data belongs to')}>REGION</th><th ${D('Dana masuk ('+cuLab()+') pada periode terpilih','Funds flowing in ('+cuLab()+') over the selected period')}>IN</th><th ${D('Dana keluar ('+cuLab()+') pada periode terpilih','Funds flowing out ('+cuLab()+') over the selected period')}>OUT</th><th ${D('Selisih bersih ('+cuLab()+') = IN dikurangi OUT. Positif (hijau) = dana masuk bersih, negatif (merah) = dana keluar bersih','Net ('+cuLab()+') = IN minus OUT. Positive (green) = net inflow, negative (red) = net outflow')}>NET</th><th ${D('Kesimpulan suasana pasar berdasarkan arah arus dana','Market mood concluded from the direction of fund flows')}>SENTIMEN</th><th ${D('Jalur utama perpindahan dana. Tanda panah kiri = dana datang dari, panah kanan = dana pergi ke','Main paths of fund movement. Left arrow = funds come from, right arrow = funds go to')}>ALIRAN UTAMA</th></tr>${reg.map(r=>{const n=r[1]-r[2];return `<tr><td style="color:var(--w)" ${D(RG[r[0]][0],RG[r[0]][1])}>${r[0]}</td><td class="g">${cv(r[1])}</td><td>${cv(r[2])}</td><td class="${n>=0?'g':'r'}">${n>=0?'+':''}${cv(n)}</td><td class="${SC[r[3]]=='c'?'':SC[r[3]]}" style="${SC[r[3]]=='c'?'color:var(--c)':''}" ${SD(r[3])}>${r[3]}</td><td ${D('Arah aliran dana: panah kiri = dana datang dari, panah kanan = dana pergi ke','Direction of funds: left arrow = funds come from, right arrow = funds go to')}>${r[4]}</td></tr>`}).join('')}</table></div>
-<div><div class="card"><div class="ph"><span ${D('Ringkasan total arus bersih dana global pada periode terpilih','Summary of total global net fund flow over the selected period')}>SUM &lt;GFLOW&gt; — TOTAL NET</span></div><div class="g" style="font-size:22px" ${D('Total arus bersih dana global (dana masuk dikurangi dana keluar)','Total global net fund flow (inflows minus outflows)')}>+$${(6.84*fz).toFixed(2)}B</div><div class="m" ${D('Arus bersih dana seluruh dunia pada periode terpilih','Net fund flow worldwide over the selected period')}>GLOBAL ${per()} NET FLOW</div><div class="g" style="font-size:16px;margin-top:8px" ${D('Bagian arus bersih yang masuk ke pasar berkembang','Part of the net flow going into emerging markets')}>+$${(2.1*fz).toFixed(2)}B</div><div class="m" ${D('Pasar berkembang (emerging markets), misalnya Indonesia, India, Brasil','Emerging markets, e.g. Indonesia, India, Brazil')}>→ EMERGING MARKETS</div><div class="m" style="margin-top:8px" ${D('Peringkat Indonesia di antara pasar berkembang berdasarkan arus dana masuk','Indonesia rank among emerging markets by fund inflow')}>EM RANK #5: <span style="color:var(--w)">INDONESIA</span></div><div class="g" ${D('Arus dana masuk ke Indonesia: investor ritel dan pasar saham (juta rupiah)','Fund inflow into Indonesia: retail investors and stock market (Rp millions)')}>ID FLOW: +Rp ${Math.round(812*fz)}M (RT/SAHAM)</div></div>
-<div class="card"><div class="ph"><span ${D('Sinyal peringatan pasar yang perlu diperhatikan','Market alert signals worth watching')}>SGN &lt;ALERT&gt; — SINYAL</span></div><div ${D('Imbal hasil obligasi pemerintah AS tenor 10 tahun naik 3 basis poin (0,03%) menjadi 4,28%','US 10-year government bond yield rose 3 basis points (0.03%) to 4.28%')}><span class="g">▲</span> US 10Y +3bps → 4.28%</div><div ${D('Indeks dolar AS (DXY) stabil di level 104,3','US dollar index (DXY) steady at 104.3')}><span class="g">▲</span> DXY stabil 104.3</div><div ${D('Dana keluar dari Tiongkok berlanjut untuk pekan ke-6 berturut-turut','Funds leaving China for the 6th week in a row')}><span class="r">▼</span> CN outflow lanjut pekan ke-6</div><div style="color:var(--c)" ${D('Catatan pantauan: kenaikan imbal hasil AS menarik dana keluar dari pasar berkembang','Watch note: rising US yields pull funds out of emerging markets')}>i PANTAU: yield naik = tekanan keluar EM</div></div></div></div>
-<div class="gr3">${pn('FX &lt;CUR&gt; — KURS',[['USD/IDR','16,240','+0.2%'],['EUR/USD','1.0845','-0.1%'],['USD/JPY','149.82','+0.3%'],['DXY','104.31','-0.1%']])}${pn('CMDTY/FI — EMAS & OBLIGASI',[['XAU/oz','2,910','+0.8%'],['WTI/bbl','78.40','-0.5%'],['US 10Y','4.28%','+3bps'],['ID 10Y','6.78%','-2bps']])}${pn('EQ/CRYPTO — SAHAM & KRIPTO',[['IHSG','6,480','+0.5%'],['S&P500','5,780','+0.2%'],['BTC/USD','97,200','+1.2%'],['ETH/USD','3,810','+0.9%']])}</div>
-<div class="card"><div class="ph">WIRE &lt;NWS&gt; — MAB NEWS WIRE [HEADLINES LIVE]</div>${W.map(w=>`<div class="row" style="grid-template-columns:50px 36px 1fr"><span class="m" ${D('Jam berita ditayangkan','Time the headline was published')}>${w[0]}</span><span style="color:var(--c)" ${D(...TG[w[1]])}>[${w[1]}]</span><span ${D('Judul berita (data contoh)','News headline (sample data)')} data-side="1">${w[2]}</span></div>`).join('')}<div class="m" style="margin-top:6px">Data contoh/simulasi.</div></div>`}
+ return `<div class="gr2"><div class="card tbl cur">${curBtn()}<div class="ph"><span ${D('Arus dana global antar kawasan pada periode terpilih ('+cuLab()+')','Global capital flows between regions over the selected period ('+cuLab()+')')}>MAP &lt;GFLOW&gt; — ${S('ARUS DANA GLOBAL','GLOBAL CAPITAL FLOW')} ${pr?predIn():perIn()} ${curUnit()}</span> ${simTag()}</div><table><tr class="m"><th ${D('Wilayah atau negara asal data arus dana','Region or country the fund-flow data belongs to')}>REGION</th><th ${D('Dana masuk ('+cuLab()+') pada periode terpilih','Funds flowing in ('+cuLab()+') over the selected period')}>IN</th><th ${D('Dana keluar ('+cuLab()+') pada periode terpilih','Funds flowing out ('+cuLab()+') over the selected period')}>OUT</th><th ${D('Selisih bersih ('+cuLab()+') = IN dikurangi OUT. Positif (hijau) = dana masuk bersih, negatif (merah) = dana keluar bersih','Net ('+cuLab()+') = IN minus OUT. Positive (green) = net inflow, negative (red) = net outflow')}>NET</th><th ${D('Kesimpulan suasana pasar berdasarkan arah arus dana','Market mood concluded from the direction of fund flows')}>SENTIMEN</th><th ${D('Jalur utama perpindahan dana. Tanda panah kiri = dana datang dari, panah kanan = dana pergi ke','Main paths of fund movement. Left arrow = funds come from, right arrow = funds go to')}>ALIRAN UTAMA</th></tr>${reg.map(r=>{const n=r[1]-r[2];return `<tr><td style="color:var(--w)" ${D(RG[r[0]][0],RG[r[0]][1])}>${r[0]}</td><td class="g">${cv(r[1])}</td><td>${cv(r[2])}</td><td class="${n>=0?'g':'r'}">${n>=0?'+':''}${cv(n)}</td><td class="${SC[r[3]]=='c'?'':SC[r[3]]}" style="${SC[r[3]]=='c'?'color:var(--c)':''}" ${SD(r[3])}>${r[3]}</td><td ${D('Arah aliran dana: panah kiri = dana datang dari, panah kanan = dana pergi ke','Direction of funds: left arrow = funds come from, right arrow = funds go to')}>${r[4]}</td></tr>`}).join('')}</table></div>
+<div><div class="card"><div class="ph"><span ${D('Ringkasan total arus bersih dana global pada periode terpilih','Summary of total global net fund flow over the selected period')}>SUM &lt;GFLOW&gt; — TOTAL NET</span> ${simTag()}</div><div class="g" style="font-size:22px" ${D('Total arus bersih dana global (dana masuk dikurangi dana keluar)','Total global net fund flow (inflows minus outflows)')}>+$${(6.84*fz).toFixed(2)}B</div><div class="m" ${D('Arus bersih dana seluruh dunia pada periode terpilih','Net fund flow worldwide over the selected period')}>GLOBAL ${per()} NET FLOW</div><div class="g" style="font-size:16px;margin-top:8px" ${D('Bagian arus bersih yang masuk ke pasar berkembang','Part of the net flow going into emerging markets')}>+$${(2.1*fz).toFixed(2)}B</div><div class="m" ${D('Pasar berkembang (emerging markets), misalnya Indonesia, India, Brasil','Emerging markets, e.g. Indonesia, India, Brazil')}>→ EMERGING MARKETS</div><div class="m" style="margin-top:8px" ${D('Peringkat Indonesia di antara pasar berkembang berdasarkan arus dana masuk','Indonesia rank among emerging markets by fund inflow')}>EM RANK #5: <span style="color:var(--w)">INDONESIA</span></div><div class="g" ${D('Arus dana masuk ke Indonesia: investor ritel dan pasar saham (juta rupiah)','Fund inflow into Indonesia: retail investors and stock market (Rp millions)')}>ID FLOW: +Rp ${Math.round(812*fz)}M (RT/SAHAM)</div></div>
+${sgnCard()}</div></div>
+<div class="gr3">${pn('FX &lt;CUR&gt; — KURS',RDROWS('fx'))}${pn('CMDTY/FI — EMAS & OBLIGASI',RDROWS('cmd'))}${pn('EQ/CRYPTO — SAHAM & KRIPTO',RDROWS('eq'))}</div>
+${wireCard()}`}
 function body(m){if(m.k=='home')return home();
  if(m.k=='price'){const[n,b]=m.i[sel]||m.i[0],s=ser(m.id+n,b),ch=(s.at(-1)/s[0]-1)*100;
   return `<div class="tabs">${m.i.map((x,j)=>`<span class="${j==sel?'on':''}" onclick="sel=${j};res=null;draw()">${x[0]}</span>`).join('')}</div><div class="card"><b>${n}</b> ${f(s.at(-1))} <span class="${ch>=0?'g':'r'}">${ch>=0?'+':''}${ch.toFixed(2)}%</span>${pchart(m,n,s)}</div>`}
@@ -258,98 +442,6 @@ const KS_SEL='#main .zin,#main .zi,#main .zm,#main .zb,#main .tfs,#main .tbl,#ma
 function drawOld(keep){let st=null;if(keep){st={a:[...document.querySelectorAll(KS_SEL)].map(e=>[e.scrollTop,e.scrollLeft]),c:[...document.querySelectorAll('#vc .card')].map(c=>[c.style.height,c.classList.contains('cl')]),y:scrollY}}draw0();post();if(st){document.querySelectorAll(KS_SEL).forEach((e,i)=>{const s=st.a[i];if(s){e.scrollTop=s[0];e.scrollLeft=s[1]}});document.querySelectorAll('#vc .card').forEach((c,i)=>{const s=st.c[i];if(s){if(s[0])c.style.height=s[0];c.classList.toggle('cl',s[1])}});if(Math.abs(scrollY-st.y)>1)scrollTo(0,st.y)}}
 function draw0(){const m=M[cur];
  document.getElementById('nav').className=side?'open':'';document.getElementById('scr').style.display=side?'block':'none';document.getElementById('nav').innerHTML=M.map((x,j)=>`<a class="${j==cur?'on':''}" onclick="cur=${j};sel=0;res=null;xs=[];cc=false;xp=false;zr();if(${j}==0)vw='tabel';mn=false;side=false;draw()">${x.t}</a>`).join('');
- document.getElementById('main').className=m.k=='cacing'?'cacm':'';document.getElementById('main').innerHTML=m.k=='cacing'?cacHtml():`<div class="bar"><h2>${m.t} <small class="simb">${S('DATA SIMULASI','SIMULATED DATA')}</small></h2><div class="ctl"><div class="dd"><button onclick="menuSet(!mn)" onpointerenter="if(event.pointerType=='mouse')menuSet(1)">Analisa Pakar ▾</button><div class="menu ${mn?'open':''}">${E.map(e=>e[2]?`<div class="aw ${sub?'so':''}" onpointerenter="if(event.pointerType=='mouse')subSet(1)" onpointerleave="if(event.pointerType=='mouse')subSet(0)"><div onclick="subSet(!sub)">${e[1]} <span class="ar"></span></div><div class="v">${V.map((l,j)=>`<div onclick="run('${e[0]}',${j},1)">${l}</div>`).join('')}</div></div>`:`<div onclick="run('${e[0]}',0,1)">${e[1]}</div>`).join('')}</div></div>${VB.map(([k,l])=>`<button class="vb ${vw==k?'on':''}" onclick="vw='${k}';draw()">${l}</button>`).join('')}</div></div><div id="vc">${cmp&&m.k!='news'?split(m):view(m)}</div><div id="cmpbar"></div>${res?`${recAll(m)}<div class="card" style="display:none"><div class="m">${res.l} &rarr; ${res.n}</div><p><span class="badge" style="background:${sc(res.sig)}">${res.sig}</span> keyakinan ${res.conf}%</p>${res.N.map(x=>`<div>&bull; ${x}</div>`).join('')}<div class="m" style="margin-top:8px">Logika engine di sini placeholder demo; bukan saran investasi.</div></div>`:''}`}
+ document.getElementById('main').className=(m.k=='cacing'||m.k=='pasar')?'cacm':'';document.getElementById('main').innerHTML=m.k=='cacing'?cacHtml():m.k=='pasar'?pasarHtml():`<div class="bar"><h2>${m.t} ${simBadge(m)}</h2><div class="ctl"><div class="dd"><button onclick="menuSet(!mn)" onpointerenter="if(event.pointerType=='mouse')menuSet(1)">Analisa Pakar ▾</button><div class="menu ${mn?'open':''}">${E.map(e=>e[2]?`<div class="aw ${sub?'so':''}" onpointerenter="if(event.pointerType=='mouse')subSet(1)" onpointerleave="if(event.pointerType=='mouse')subSet(0)"><div onclick="subSet(!sub)">${e[1]} <span class="ar"></span></div><div class="v">${V.map((l,j)=>`<div onclick="run('${e[0]}',${j},1)">${l}</div>`).join('')}</div></div>`:`<div onclick="run('${e[0]}',0,1)">${e[1]}</div>`).join('')}</div></div>${VB.map(([k,l])=>`<button class="vb ${vw==k?'on':''}" onclick="vw='${k}';draw()">${l}</button>`).join('')}</div></div><div id="vc">${cmp&&m.k!='news'?split(m):view(m)}</div><div id="cmpbar"></div>${res?`${recAll(m)}<div class="card" style="display:none"><div class="m">${res.l} &rarr; ${res.n}</div><p><span class="badge" style="background:${sc(res.sig)}">${res.sig}</span> keyakinan ${res.conf}%</p>${res.N.map(x=>`<div>&bull; ${x}</div>`).join('')}<div class="m" style="margin-top:8px">Logika engine di sini placeholder demo; bukan saran investasi.</div></div>`:''}`}
 const tz=z=>new Date().toLocaleTimeString('en-GB',{timeZone:z});const tick=()=>{document.getElementById('clk').textContent=`JKT ${tz('Asia/Jakarta')}  |  NY ${tz('America/New_York')}  |  LDN ${tz('Europe/London')}`};tick();setInterval(tick,1000);draw();
-</script>
-<script>
-(function(){
-const ESC=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const CAC=window.CAC={st:'idle',data:null,at:0,err:null,flt:'inti',open:null};
-const HL={st:'idle',data:null,err:null,at:0};
-async function api(path){
-  const r=await fetch(path,{cache:'no-store'});
-  if(!r.ok){let m='';try{m=(await r.json()).error||''}catch(_e){}throw new Error('HTTP '+r.status+(m?': '+m:''))}
-  return r.json();
-}
-const isN=v=>typeof v==='number'&&isFinite(v);
-const wib=iso=>{if(!iso)return '—';const d=new Date(iso);if(isNaN(d))return '—';return d.toLocaleString('id-ID',{timeZone:'Asia/Jakarta',hour12:false,day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+' WIB'};
-const ageH=iso=>{const t=Date.parse(iso);return isFinite(t)?(Date.now()-t)/3600000:Infinity};
-const ago=iso=>{const h=ageH(iso);if(!isFinite(h))return '';return h<1?Math.round(h*60)+' mnt lalu':h<48?Math.round(h)+' jam lalu':Math.round(h/24)+' hari lalu'};
-const pct=(v,d=1)=>isN(v)?v.toFixed(d)+'%':'—';
-const idr=v=>!isN(v)?'—':v>=1e9?'Rp'+(v/1e9).toFixed(1)+' M':'Rp'+Math.round(v/1e6)+' jt';
-const TIERC={inti:'var(--g)',gugur:'var(--r)',belum_ada_intel:'var(--a)'};
-const TIERL=()=>({inti:'INTI',gugur:S('GUGUR','OUT'),belum_ada_intel:S('BELUM ADA INTEL','NO INTEL')});
-const safeUrl=u=>typeof u==='string'&&/^https:\/\//i.test(u)?u:null;
-function redraw(){if(typeof M!=='undefined'&&M[cur]&&M[cur].k==='cacing'){const y=scrollY;draw();scrollTo(0,y)}}
-window.cacLoad=async function(force){
-  if(CAC.st==='loading')return;
-  if(!force&&CAC.st==='ok'&&Date.now()-CAC.at<300000)return;
-  CAC.st='loading';CAC.err=null;redraw();
-  try{CAC.data=await api('/api/idx/cacing');CAC.at=Date.now();CAC.st='ok'}
-  catch(e){CAC.st='err';CAC.err=String(e&&e.message||e)}
-  redraw();
-};
-window.cacTog=function(c){CAC.open=CAC.open===c?null:c;redraw()};
-window.cacFlt=function(f){CAC.flt=f;redraw()};
-function detail(c){
-  const i=c.intel,l=c.liquidity||{},fc=c.floatCheck||{},parts=[];
-  if(c.reasons&&c.reasons.length)parts.push(`<div><b class="r">${S('Alasan gugur','Reasons out')}:</b> ${c.reasons.map(ESC).join('; ')}</div>`);
-  if(c.warnings&&c.warnings.length)parts.push(`<div><b style="color:var(--a)">${S('Peringatan','Warnings')}:</b> ${c.warnings.map(ESC).join('; ')}</div>`);
-  parts.push(`<div class="m">${S('Harga','Price')} ${ESC(c.close)} | PBV ${ESC(c.pbv)} | ${S('Harga/NAV','Price/NAV')} ${ESC(c.priceToNav)} | ${S('Liabilitas','Liabilities')} Rp${ESC(c.liabilitiesBn)} M | ${S('Ekuitas','Equity')} Rp${ESC(c.equityBn)} M</div>`);
-  parts.push(`<div class="m">${S('Likuiditas','Liquidity')}: ${ESC(l.status)} | ${S('nilai','value')} ${idr(l.valueIdr)} | vol ${ESC(l.volume)} | freq ${ESC(l.frequency)} | ${S('data tanggal','data date')} ${ESC(String(l.lastDate||'').slice(0,10))} | unit: ${ESC(l.unitCheck)}</div>`);
-  parts.push(`<div class="m">${S('Cek float','Float check')}: TradingView ${pct(fc.tradingview)} | Pasardana ${pct(fc.pasardana)} | IDX ${pct(fc.idxPublic)} | ${S('selisih','gap')} ${isN(fc.gapPts)?fc.gapPts+' poin':'—'}${fc.flag?' <span style="color:var(--a)">⚑ '+ESC(fc.flag)+'</span>':''}</div>`);
-  if(i){
-    parts.push(`<div class="m">${S('Intel IDX','IDX intel')}: ${S('laporan keuangan','fin. statements')} ${ESC(i.fsDate)} | DER ${ESC(i.der)} | ${S('diterima','received')} ${wib(i.receivedAt)}</div>`);
-    if(i.holders&&i.holders.length)parts.push(`<div style="margin-top:4px">${i.holders.map(h=>`<div class="row" style="grid-template-columns:1fr 70px"><span>${ESC(h.nama)} <span class="m">(${ESC(h.kategori)})</span></span><span>${pct(h.pct,2)}</span></div>`).join('')}</div>`);
-    if(i.announcements&&i.announcements.length)parts.push(`<div style="margin-top:6px"><b>${S('Pengumuman','Announcements')}</b> <span class="m">(${S('judul bukan konfirmasi; baca PDF','titles are not confirmation; read the PDF')})</span>${i.announcements.map(a=>{const u=safeUrl(a.pdf);return `<div>${ESC(a.date)} <span class="m">[${ESC(a.level)}]</span> ${u?`<a href="${ESC(u)}" target="_blank" rel="noopener noreferrer" style="color:var(--c)">${ESC(a.title)}</a>`:ESC(a.title)}</div>`}).join('')}</div>`);
-  }else parts.push(`<div class="m">${S('Belum ada intel IDX untuk emiten ini (jalankan kolektor).','No IDX intel for this issuer yet (run the collector).')}</div>`);
-  return parts.join('');
-}
-window.cacHtml=function(){
-  if(CAC.st==='idle'||(CAC.st==='ok'&&Date.now()-CAC.at>300000))setTimeout(()=>window.cacLoad(),0);
-  const head=`<div class="bar"><h2>${S('Cacing-Naga — Daftar Pantauan','Worm-Dragon — Watchlist')} <small class="livb">${S('DATA NYATA','LIVE DATA')}</small></h2><div class="cacbtn"><button onclick="cacLoad(true)">${S('Muat ulang','Reload')}</button></div></div>`;
-  if(CAC.st==='err')return head+`<div class="card"><b class="r">${S('Gagal memuat dari backend','Failed to load from backend')}</b><div class="m">${ESC(CAC.err)}</div><div class="m" style="margin-top:6px">${S('Periksa Pages Function /api dan secret API_TOKEN di proyek Pages.','Check the /api Pages Function and the API_TOKEN secret in the Pages project.')}</div></div>`;
-  const d=CAC.data;
-  if(!d)return head+`<div class="card m">${S('Memuat data dari backend…','Loading data from backend…')}</div>`;
-  const j=d.judgement||{},t=j.tiers||{},rules=j.rules||{},lq=d.liquidity||{},cs=d.candidates||[];
-  const stale=(iso,h)=>ageH(iso)>h?' style="color:var(--a)"':'';
-  const meta=`<div class="card"><div class="ph">${S('Sumber dan waktu data','Sources and data time')}</div>
-   <div${stale(d.computedAt,36)}>${S('Saringan TradingView','TradingView screen')}: ${wib(d.computedAt)} <span class="m">(${ago(d.computedAt)})</span></div>
-   <div${stale(lq.asOf,36)}>${S('Likuiditas Pasardana','Pasardana liquidity')}: ${wib(lq.asOf)} <span class="m">(${ago(lq.asOf)})</span>${lq.error?` <span class="r">${ESC(lq.error)}</span>`:''}</div>
-   <div>${S('Intel IDX (kolektor)','IDX intel (collector)')}: ${wib(j.intelUpdatedAt)} <span class="m">(${ago(j.intelUpdatedAt)})</span>${j.intelError?` <span class="r">${ESC(j.intelError)}</span>`:''}</div>
-   <div class="m">${S('Diambil di browser','Fetched in browser')}: ${wib(new Date(CAC.at).toISOString())}${CAC.st==='loading'?' · '+S('memuat ulang…','reloading…'):''}</div>
-   <div class="m" style="margin-top:6px">${ESC(j.note||d.note||'')}</div>
-   <div class="m" style="margin-top:6px">${S('Aturan','Rules')}: ${S('kapitalisasi','market cap')} &lt; Rp${ESC(d.params&&d.params.marketCapMaxBn)} M · DER ≤ ${ESC(rules.derMax)} · ${S('publik','public')} ≤ ${ESC(rules.publicMaxPct)}% · owner ${ESC(rules.ownerMinPct)}–${ESC(rules.ownerMaxPct)}% · ${S('return 1 th','1y return')} &gt; ${isN(rules.oneYearDropLimit)?Math.round(rules.oneYearDropLimit*100):'?'}%</div></div>`;
-  const tl=TIERL();
-  const tiles=`<div class="tiles" style="margin-bottom:14px">${['inti','belum_ada_intel','gugur'].map(k=>`<div class="tile" style="background:var(--p);border:1px solid var(--b)"><b style="color:${TIERC[k]}">${ESC(t[k]==null?0:t[k])}</b>${tl[k]}</div>`).join('')}</div>`;
-  const chips=[['inti',`INTI (${t.inti||0})`],['gugur',`${tl.gugur} (${t.gugur||0})`],['belum_ada_intel',`${tl.belum_ada_intel} (${t.belum_ada_intel||0})`],['all',S(`SEMUA (${cs.length})`,`ALL (${cs.length})`)]];
-  const flt=`<div class="cacf" style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px">${chips.map(([k,l])=>`<span class="chip ${CAC.flt===k?'on':''}" onclick="cacFlt('${k}')">${ESC(l)}</span>`).join('')}</div>`;
-  const rows=cs.filter(c=>CAC.flt==='all'||c.tier===CAC.flt);
-  const th=['CODE',S('TINGKAT','TIER'),S('KAP (Rp M)','CAP (Rp B)'),'DER',S('PUBLIK','PUBLIC'),'OWNER',S('PEMEGANG TERBESAR','TOP HOLDER'),S('RETURN 1TH','1Y RET'),S('TRANSAKSI/HARI','VALUE/DAY')];
-  const tr=rows.map(c=>{
-    const i=c.intel,l=c.liquidity||{},a=i&&i.adjusted,top=i&&i.topHolder,oy=l.oneYear,open=CAC.open===c.code;
-    const der=i&&isN(i.der)?i.der:c.derIdx;
-    const main=`<tr class="cr" data-c="${ESC(c.code)}" onclick="cacTog(this.dataset.c)"><td><b style="color:var(--w)">${ESC(c.code)}</b><br><span class="m" style="font-size:12px">${ESC(c.name||'')}</span></td><td><span class="badge" style="background:${TIERC[c.tier]||'var(--m)'}">${ESC(tl[c.tier]||c.tier)}</span></td><td>${ESC(c.marketCapBn)}</td><td>${ESC(der)}</td><td>${pct(a&&a.publicPct)}</td><td>${pct(a&&a.ownerPct)}</td><td style="text-align:left">${top?ESC(top.name)+' '+pct(top.pct):'—'}</td><td class="${isN(oy)?(oy>-0.4?(oy>=0?'g':''):'r'):'m'}">${isN(oy)?(oy>=0?'+':'')+Math.round(oy*100)+'%':'—'}</td><td${l.status&&l.status!=='ok'?' style="color:var(--a)"':''}>${idr(l.valueIdr)}</td></tr>`;
-    return main+(open?`<tr class="cacd"><td colspan="9">${detail(c)}</td></tr>`:'');
-  }).join('');
-  const table=`<div class="card tbl"><table><tr class="m">${th.map(x=>`<th>${x}</th>`).join('')}</tr>${tr||`<tr><td colspan="9" class="m">${S('Tidak ada emiten pada filter ini.','No issuers in this filter.')}</td></tr>`}</table><div class="m" style="margin-top:8px">${S('Klik baris untuk rincian. Daftar pantauan, bukan sinyal beli; bukan nasihat investasi.','Click a row for details. Watchlist, not a buy signal; not investment advice.')}</div></div>`;
-  return head+meta+tiles+flt+table;
-};
-async function hlLoad(){
-  try{HL.data=await api('/api/health');HL.st='ok'}catch(e){HL.st='err';HL.err=String(e&&e.message||e)}
-  HL.at=Date.now();hlPaint();
-}
-function hlPaint(){
-  const el=document.getElementById('lvt');if(!el)return;
-  let color='var(--m)',txt='…',tip='';
-  if(HL.st==='ok'){
-    const bad=((HL.data&&HL.data.crons)||[]).filter(c=>c.state==='basi'||c.state==='gagal');
-    if(HL.data&&HL.data.status==='healthy'){color='var(--g)';txt='LIVE';tip='Backend sehat'}
-    else{color='var(--a)';txt='DEGRADED';tip='Cron bermasalah: '+bad.map(c=>c.name+' ('+c.state+')').join(', ')}
-  }else if(HL.st==='err'){color='var(--r)';txt='OFFLINE';tip=HL.err||''}
-  el.innerHTML=`<span style="color:${color}">●</span> ${txt}`;el.title=tip;
-}
-window.hlLoad=hlLoad;
-hlLoad();setInterval(hlLoad,60000);
-})();
 </script></body></html>
