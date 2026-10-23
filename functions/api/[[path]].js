@@ -6,6 +6,7 @@ const ROUTES = {
   "/api/idx/cacing": [],
   "/api/market/overview": [],
   "/api/market/news": [],
+  "/api/market/fxflow": [],
   "/api/idx/rumor": ["matched"],
   "/api/signals": ["market", "symbols"],
 };
