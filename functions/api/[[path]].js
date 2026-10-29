@@ -7,6 +7,7 @@ const ROUTES = {
   "/api/market/overview": [],
   "/api/market/news": [],
   "/api/market/fxflow": [],
+  "/api/market/sectors": [],
   "/api/idx/rumor": ["matched"],
   "/api/signals": ["market", "symbols"],
 };
